@@ -129,7 +129,7 @@ jobs:
         run: sudo ./scripts/setup-ubuntu.sh
 
       - name: Download presto fuzzer
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: presto
 
@@ -177,7 +177,7 @@ jobs:
         run: sudo ./scripts/setup-ubuntu.sh
 
       - name: Download spark expression fuzzer
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: spark_expression_fuzzer
 
@@ -210,7 +210,7 @@ jobs:
             /tmp/spark_fuzzer_repro
 
       - name: Download spark aggregation fuzzer
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: spark_aggregation_fuzzer
 
@@ -251,7 +251,7 @@ jobs:
         run: sudo ./scripts/setup-ubuntu.sh
 
       - name: Download aggregation fuzzer
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: aggregation
 
@@ -292,7 +292,7 @@ jobs:
         run:  sudo ./scripts/setup-ubuntu.sh
 
       - name: Download join fuzzer
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: join
 
