@@ -12,17 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Build the test and build container for presto_cpp
-ARG image=quay.io/centos/centos:stream9
+ARG image=nvidia/cuda:12.8.0-base-rockylinux9
 FROM $image
 
 COPY scripts/setup-helper-functions.sh /
-COPY scripts/setup-centos9.sh /
+COPY scripts/setup-rocky9.sh /
 
 # Building libvelox.so requires folly and gflags to be built shared as well for now
-ENV  VELOX_BUILD_SHARED=ON
+ENV VELOX_BUILD_SHARED=ON
 # The removal of the build dir has to happen in the same layer as the build
 # to minimize the image size. gh & jq are required for CI
-RUN mkdir build && ( cd build && bash /setup-centos9.sh ) && rm -rf build && \
+RUN mkdir build && ( cd build && bash /setup-rocky9.sh ) && rm -rf build && \
         dnf install -y -q 'dnf-command(config-manager)' && \
         dnf config-manager --add-repo 'https://cli.github.com/packages/rpm/gh-cli.repo' && \
         dnf install -y -q gh jq && \

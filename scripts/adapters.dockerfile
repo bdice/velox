@@ -12,13 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Build the test and build container for presto_cpp
-ARG image=ghcr.io/facebookincubator/velox-dev:centos9
+ARG image=ghcr.io/facebookincubator/velox-dev:rocky9
 FROM $image
 
 COPY scripts/setup-helper-functions.sh /
 COPY scripts/setup-adapters.sh /
-RUN mkdir build && ( cd build &&  source /opt/rh/gcc-toolset-12/enable && \
-    bash /setup-adapters.sh ) && rm -rf build && dnf remove -y conda && dnf clean all
+COPY scripts/setup-cuda.sh /
+RUN mkdir build && \
+    ( \
+      cd build && \
+      source /opt/rh/gcc-toolset-12/enable && \
+      bash /setup-adapters.sh && \
+      bash /setup-cuda.sh \
+    ) && \
+    rm -rf build && dnf remove -y conda && dnf clean all
 
 # install miniforge
 RUN curl -L -o /tmp/miniforge.sh https://github.com/conda-forge/miniforge/releases/download/23.11.0-0/Mambaforge-23.11.0-0-Linux-x86_64.sh && \

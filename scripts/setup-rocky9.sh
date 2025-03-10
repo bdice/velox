@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# This script documents setting up a Centos9 host for Velox
+# This script documents setting up a Rocky Linux 9 host for Velox
 # development.  Running it should make you ready to compile.
 #
 # Environment variables:
@@ -22,7 +22,7 @@
 #     Use "n" to never wipe directories.
 #
 # You can also run individual functions below by specifying them as arguments:
-# $ scripts/setup-centos9.sh install_googletest install_fmt
+# $ scripts/setup-rocky9.sh install_googletest install_fmt
 #
 
 set -efx -o pipefail

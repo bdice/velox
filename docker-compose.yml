@@ -34,34 +34,6 @@ services:
       - .:/velox:delegated
     command: scripts/docker-command.sh
 
-  ubuntu-cuda-cpp:
-    # Usage:
-    #   docker-compose pull ubuntu-cuda-cpp or docker-compose build ubuntu-cuda-cpp
-    #   docker-compose run --rm ubuntu-cuda-cpp
-    #   or
-    #   docker-compose run -e NUM_THREADS=<NUMBER_OF_THREADS_TO_USE> --rm ubuntu-cuda-cpp
-    #   to set the number of threads used during compilation
-    #image: ghcr.io/facebookincubator/velox-dev:amd64-ubuntu-22.04-avx
-    build:
-      context: .
-      dockerfile: scripts/ubuntu-22.04-cuda-12.8-cpp.dockerfile
-    environment:
-      NUM_THREADS: 8 # default value for NUM_THREADS
-      VELOX_DEPENDENCY_SOURCE: BUNDLED # Build dependencies from source
-      CCACHE_DIR: "/velox/.ccache"
-      CMAKE_EXPORT_COMPILE_COMMANDS: 1
-    privileged: true
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    volumes:
-      - .:/velox:delegated
-    command: scripts/docker-command.sh
-
   adapters-cpp:
     # Usage:
     #   docker-compose pull adapters-cpp or docker-compose build adapters-cpp
@@ -77,7 +49,7 @@ services:
       context: .
       dockerfile: scripts/adapters.dockerfile
       args:
-        image: ghcr.io/facebookincubator/velox-dev:centos9
+        image: ghcr.io/facebookincubator/velox-dev:rocky9
     environment:
       NUM_THREADS: 8 # default value for NUM_THREADS
       CCACHE_DIR: "/velox/.ccache"
@@ -88,19 +60,57 @@ services:
     working_dir: /velox
     command: /velox/scripts/docker-command.sh
 
-  centos-cpp:
+  adapters-cuda:
     # Usage:
-    #   docker-compose pull centos-cpp or docker-compose build centos-cpp
-    #   docker-compose run --rm centos-cpp
+    #   docker-compose pull adapters-cuda or docker-compose build adapters-cuda
     #   or
-    #   docker-compose run -e NUM_THREADS=<NUMBER_OF_THREADS_TO_USE> --rm centos-cpp
+    #   docker-compose run --rm adapters-cuda
+    #   or
+    #   docker-compose run -e NUM_THREADS=<NUMBER_OF_THREADS_TO_USE> --rm adapters-cuda
     #   to set the number of threads used during compilation
-    image: ghcr.io/facebookincubator/velox-dev:centos9
+    # scripts/adapters.dockerfile uses SHELL which is not supported for OCI image format.
+    # podman users must specify "--podman-build-args='--format docker'" argument.
+#   image: ghcr.io/facebookincubator/velox-dev:adapters
     build:
       context: .
-      dockerfile: scripts/centos.dockerfile
+      dockerfile: scripts/adapters.dockerfile
       args:
-        image: quay.io/centos/centos:stream9
+        #image: ghcr.io/facebookincubator/velox-dev:rocky9
+        image: rocky9-velox
+    environment:
+      NUM_THREADS: 8 # default value for NUM_THREADS
+      # VELOX_DEPENDENCY_SOURCE: BUNDLED # Build dependencies from source
+      CCACHE_DIR: "/velox/.ccache"
+      # CMAKE_EXPORT_COMPILE_COMMANDS: 1
+      EXTRA_CMAKE_FLAGS: -DVELOX_ENABLE_PARQUET=ON
+                         -DVELOX_ENABLE_S3=ON
+    privileged: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - .:/velox:delegated
+    working_dir: /velox
+    command: /velox/scripts/docker-command.sh
+
+
+  rocky-cpp:
+    # Usage:
+    #   docker-compose pull rocky-cpp or docker-compose build rocky-cpp
+    #   docker-compose run --rm rocky-cpp
+    #   or
+    #   docker-compose run -e NUM_THREADS=<NUMBER_OF_THREADS_TO_USE> --rm rocky-cpp
+    #   to set the number of threads used during compilation
+    image: ghcr.io/facebookincubator/velox-dev:rocky9
+    build:
+      context: .
+      dockerfile: scripts/rocky.dockerfile
+      args:
+        image: quay.io/rocky/rocky:stream9
     environment:
       NUM_THREADS: 8 # default value for NUM_THREADS
       CCACHE_DIR: "/velox/.ccache"

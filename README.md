@@ -168,14 +168,14 @@ $ ./scripts/setup-ubuntu.sh
 $ make
 ```
 
-### Setting up on Centos 9 Stream with adapters
+### Setting up on Rocky Linux 9 with adapters
 
 Velox adapters include file-systems such as AWS S3, Google Cloud Storage,
 and Azure Blob File System. These adapters require installation of additional
 libraries. Once you have checked out Velox, you can setup and build like so:
 
 ```shell
-$ ./scripts/setup-centos9.sh
+$ ./scripts/setup-rocky9.sh
 $ ./scripts/setup-adapters.sh
 $ make
 ```
@@ -185,7 +185,7 @@ Note that `setup-adapters.sh` supports macOS and Ubuntu 20.04 or later.
 ### Using Clang on Linux
 
 Clang 15 can be additionally installed during the setup step for Ubuntu 22.04/24.04
-and CentOS 9 by setting the `USE_CLANG` environment variable prior to running the platform specific setup script.
+and Rocky Linux 9 by setting the `USE_CLANG` environment variable prior to running the platform specific setup script.
 ```shell
 $ export USE_CLANG=true
 ```
