@@ -27,6 +27,11 @@ add_library(
   Utilities.cpp
   VeloxCudfInterop.cpp)
 
+set_target_properties(
+  velox_cudf_exec
+  PROPERTIES CUDA_STANDARD ${VELOX_CUDF_CUDA_STANDARD}
+             CUDA_STANDARD_REQUIRED ON)
+
 target_link_libraries(
   velox_cudf_exec
   PUBLIC cudf::cudf

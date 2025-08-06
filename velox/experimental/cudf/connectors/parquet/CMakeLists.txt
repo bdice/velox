@@ -16,7 +16,9 @@ add_library(velox_cudf_parquet_config ParquetConfig.cpp)
 
 set_target_properties(
   velox_cudf_parquet_config
-  PROPERTIES CUDA_ARCHITECTURES native)
+  PROPERTIES CUDA_ARCHITECTURES native
+             CUDA_STANDARD ${VELOX_CUDF_CUDA_STANDARD}
+             CUDA_STANDARD_REQUIRED ON)
 
 target_link_libraries(
   velox_cudf_parquet_config velox_core velox_exception cudf::cudf)
@@ -32,7 +34,9 @@ add_library(
 
 set_target_properties(
   velox_cudf_parquet_connector
-  PROPERTIES CUDA_ARCHITECTURES native)
+  PROPERTIES CUDA_ARCHITECTURES native
+             CUDA_STANDARD ${VELOX_CUDF_CUDA_STANDARD}
+             CUDA_STANDARD_REQUIRED ON)
 
 target_link_libraries(
   velox_cudf_parquet_connector

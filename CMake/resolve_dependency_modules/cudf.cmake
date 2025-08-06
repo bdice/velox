@@ -17,6 +17,9 @@ include_guard(GLOBAL)
 # 3.30.4 is the minimum version required by cudf
 cmake_minimum_required(VERSION 3.30.4)
 
+# Set CUDA C++ standard for all cudf-related builds
+set(VELOX_CUDF_CUDA_STANDARD 20 CACHE STRING "CUDA C++ standard for cudf builds")
+
 set(VELOX_rapids_cmake_VERSION 25.08)
 set(VELOX_rapids_cmake_BUILD_SHA256_CHECKSUM
     f0e5484d49d9365b84eb41799db4fb1c5c8532f251ace734ead168bbbc1111c7)
@@ -58,6 +61,10 @@ block(SCOPE_FOR VARIABLES)
 set(BUILD_TESTS OFF)
 set(CUDF_BUILD_TESTUTIL OFF)
 set(BUILD_SHARED_LIBS ON)
+
+# Set CMAKE_CUDA_STANDARD to ensure consistent CUDA C++ standard
+set(CMAKE_CUDA_STANDARD ${VELOX_CUDF_CUDA_STANDARD})
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 FetchContent_Declare(
   rapids-cmake

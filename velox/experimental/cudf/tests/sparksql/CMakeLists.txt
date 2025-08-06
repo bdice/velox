@@ -14,6 +14,11 @@
 
 add_executable(velox_cudf_spark_aggregates_test AggregationTest.cpp Main.cpp)
 
+set_target_properties(
+  velox_cudf_spark_aggregates_test
+  PROPERTIES CUDA_STANDARD ${VELOX_CUDF_CUDA_STANDARD}
+             CUDA_STANDARD_REQUIRED ON)
+
 add_test(
   NAME velox_cudf_spark_aggregates_test
   COMMAND velox_cudf_spark_aggregates_test

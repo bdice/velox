@@ -21,6 +21,14 @@ add_executable(velox_cudf_local_partition_test Main.cpp LocalPartitionTest.cpp)
 add_executable(velox_cudf_filter_project_test Main.cpp FilterProjectTest.cpp)
 add_executable(velox_cudf_limit_test Main.cpp LimitTest.cpp)
 
+# Set CUDA standard for all cudf test executables
+set_target_properties(
+  velox_cudf_hash_join_test velox_cudf_order_by_test velox_cudf_aggregation_test 
+  velox_cudf_table_scan_test velox_cudf_table_write_test velox_cudf_local_partition_test
+  velox_cudf_filter_project_test velox_cudf_limit_test
+  PROPERTIES CUDA_STANDARD ${VELOX_CUDF_CUDA_STANDARD}
+             CUDA_STANDARD_REQUIRED ON)
+
 add_test(
   NAME velox_cudf_hash_join_test
   COMMAND velox_cudf_hash_join_test
