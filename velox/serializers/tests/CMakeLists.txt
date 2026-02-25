@@ -11,11 +11,33 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+add_executable(velox_key_encoder_test KeyEncoderTest.cpp)
+
+add_test(
+  NAME velox_key_encoder_test
+  COMMAND velox_key_encoder_test
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(
+  velox_key_encoder_test
+  velox_exec
+  velox_exec_test_lib
+  velox_key_encoder
+  velox_functions_prestosql
+  velox_vector_fuzzer
+  velox_vector_test_lib
+  GTest::gtest
+  GTest::gtest_main
+  GTest::gmock
+)
+
 add_executable(
   velox_serializer_test
   CompactRowSerializerTest.cpp
   PrestoOutputStreamListenerTest.cpp
   PrestoSerializerTest.cpp
+  SerializedPageFileTest.cpp
   UnsafeRowSerializerTest.cpp
 )
 
@@ -23,6 +45,7 @@ add_test(velox_serializer_test velox_serializer_test)
 
 target_link_libraries(
   velox_serializer_test
+  velox_expression_test_utility
   velox_presto_serializer
   velox_vector_test_lib
   velox_vector_fuzzer

@@ -75,11 +75,9 @@ class HiveConfig {
       "hive.gcs.auth.access-token-provider";
 
   /// Maps table field names to file field names using names, not indices.
-  // TODO: remove hive_orc_use_column_names since it doesn't exist in presto,
-  // right now this is only used for testing.
   static constexpr const char* kOrcUseColumnNames = "hive.orc.use-column-names";
   static constexpr const char* kOrcUseColumnNamesSession =
-      "hive_orc_use_column_names";
+      "orc_use_column_names";
 
   /// Maps table field names to file field names using names, not indices.
   static constexpr const char* kParquetUseColumnNames =
@@ -146,6 +144,15 @@ class HiveConfig {
   /// meta data together. Optimization to decrease the small IO requests
   static constexpr const char* kFilePreloadThreshold = "file-preload-threshold";
 
+  /// When set to be larger than 0, parallel unit loader feature is enabled and
+  /// it configures how many units (e.g., stripes) we load in parallel.
+  /// When set to 0, parallel unit loader feature is disabled and on demand unit
+  /// loader would be used.
+  static constexpr const char* kParallelUnitLoadCount =
+      "parallel-unit-load-count";
+  static constexpr const char* kParallelUnitLoadCountSession =
+      "parallel_unit_load_count";
+
   /// Config used to create write files. This config is provided to underlying
   /// file system through hive connector and data sink. The config is free form.
   /// The form should be defined by the underlying file system.
@@ -171,6 +178,13 @@ class HiveConfig {
   static constexpr const char* kSortWriterFinishTimeSliceLimitMsSession =
       "sort_writer_finish_time_slice_limit_ms";
 
+  /// Maximum target file size. When a file exceeds this size during writing,
+  /// the writer will close the current file and start writing to a new file.
+  /// Accepts human-readable values like "1GB". Zero means no limit (default).
+  static constexpr const char* kMaxTargetFileSize = "max-target-file-size";
+  static constexpr const char* kMaxTargetFileSizeSession =
+      "max_target_file_size";
+
   // The unit for reading timestamps from files.
   static constexpr const char* kReadTimestampUnit =
       "hive.reader.timestamp-unit";
@@ -187,15 +201,30 @@ class HiveConfig {
   static constexpr const char* kReadStatsBasedFilterReorderDisabledSession =
       "stats_based_filter_reorder_disabled";
 
-  static constexpr const char* kLocalDataPath = "hive_local_data_path";
-  static constexpr const char* kLocalFileFormat = "hive_local_file_format";
-
   /// Whether to preserve flat maps in memory as FlatMapVectors instead of
   /// converting them to MapVectors.
   static constexpr const char* kPreserveFlatMapsInMemory =
       "hive.preserve-flat-maps-in-memory";
   static constexpr const char* kPreserveFlatMapsInMemorySession =
       "hive.preserve_flat_maps_in_memory";
+
+  /// Whether to use the cluster index for filter-based row pruning.
+  /// When enabled, filters from ScanSpec are converted to index bounds for
+  /// efficient row skipping based on the file's cluster index.
+  static constexpr const char* kIndexEnabled = "index-enabled";
+  static constexpr const char* kIndexEnabledSession = "index_enabled";
+
+  /// Maximum number of output rows to return per index lookup request.
+  /// The limit is applied to the actual output rows after filtering.
+  /// 0 means no limit (default).
+  static constexpr const char* kMaxRowsPerIndexRequest =
+      "hive.max-rows-per-index-request";
+  static constexpr const char* kMaxRowsPerIndexRequestSession =
+      "hive.max_rows_per_index_request";
+
+  static constexpr const char* kUser = "user";
+  static constexpr const char* kSource = "source";
+  static constexpr const char* kSchema = "schema";
 
   InsertExistingPartitionsBehavior insertExistingPartitionsBehavior(
       const config::ConfigBase* session) const;
@@ -235,6 +264,8 @@ class HiveConfig {
 
   int32_t prefetchRowGroups() const;
 
+  size_t parallelUnitLoadCount(const config::ConfigBase* session) const;
+
   int32_t loadQuantum(const config::ConfigBase* session) const;
 
   int32_t numCacheFileHandles() const;
@@ -254,6 +285,8 @@ class HiveConfig {
   uint64_t sortWriterFinishTimeSliceLimitMs(
       const config::ConfigBase* session) const;
 
+  uint64_t maxTargetFileSizeBytes(const config::ConfigBase* session) const;
+
   uint64_t footerEstimatedSize() const;
 
   uint64_t filePreloadThreshold() const;
@@ -270,18 +303,25 @@ class HiveConfig {
   bool readStatsBasedFilterReorderDisabled(
       const config::ConfigBase* session) const;
 
-  /// Returns the file system path containing local data. If non-empty,
-  /// initializes LocalHiveConnectorMetadata to provide metadata for the tables
-  /// in the directory.
-  std::string hiveLocalDataPath() const;
-
-  /// Returns the name of the file format to use in interpreting the contents of
-  /// hiveLocalDataPath().
-  std::string hiveLocalFileFormat() const;
-
   /// Whether to preserve flat maps in memory as FlatMapVectors instead of
   /// converting them to MapVectors.
   bool preserveFlatMapsInMemory(const config::ConfigBase* session) const;
+
+  /// Whether to use the cluster index for filter-based row pruning.
+  bool indexEnabled(const config::ConfigBase* session) const;
+
+  /// Returns the maximum number of rows to read per index lookup request.
+  /// 0 means no limit (default).
+  uint32_t maxRowsPerIndexRequest(const config::ConfigBase* session) const;
+
+  /// User of the query. Used for storage logging.
+  std::string user(const config::ConfigBase* session) const;
+
+  /// Source of the query. Used for storage access and logging.
+  std::string source(const config::ConfigBase* session) const;
+
+  /// Schema of the query. Used for storage logging.
+  std::string schema(const config::ConfigBase* session) const;
 
   HiveConfig(std::shared_ptr<const config::ConfigBase> config) {
     VELOX_CHECK_NOT_NULL(

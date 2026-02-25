@@ -139,6 +139,7 @@ void serializeWrappedRanges(
     VectorStream* stream,
     Scratch& scratch) {
   std::vector<IndexRange> newRanges;
+  newRanges.reserve(rangesTotalSize(ranges));
   const bool mayHaveNulls = vector->mayHaveNulls();
   const VectorPtr& wrapped = BaseVector::wrappedVectorShared(vector);
   for (int32_t i = 0; i < ranges.size(); ++i) {
@@ -529,8 +530,9 @@ void serializeIPPrefix(
       // the ipaddress porition as big endian whereas Velox stores it as little
       auto javaIPPrefix =
           toJavaIPPrefixType(ip->valueAt(rows[i]), prefix->valueAt(rows[i]));
-      stream->values().appendStringView(std::string_view(
-          (const char*)javaIPPrefix.data(), javaIPPrefix.size()));
+      stream->values().appendStringView(
+          std::string_view(
+              (const char*)javaIPPrefix.data(), javaIPPrefix.size()));
     }
     return;
   }
@@ -558,8 +560,8 @@ void copyWords(
     const T* values,
     Conv&& conv = {}) {
   for (auto i = 0; i < numIndices; ++i) {
-    folly::storeUnaligned(
-        destination + i * sizeof(T), conv(values[indices[i]]));
+    folly::storeUnaligned<T>(
+        destination + i * sizeof(T), static_cast<T>(conv(values[indices[i]])));
   }
 }
 
@@ -576,8 +578,9 @@ void copyWordsWithRows(
     return;
   }
   for (auto i = 0; i < numIndices; ++i) {
-    folly::storeUnaligned(
-        destination + i * sizeof(T), conv(values[rows[indices[i]]]));
+    folly::storeUnaligned<T>(
+        destination + i * sizeof(T),
+        static_cast<T>(conv(values[rows[indices[i]]])));
   }
 }
 
@@ -761,7 +764,7 @@ void serializeFlatVector<TypeKind::BOOLEAN>(
     uint64_t word = bitsToBytes(reinterpret_cast<uint8_t*>(valueBits)[i]);
     auto* target = output + i * 8;
     if (i < numBytes - 1) {
-      folly::storeUnaligned(target, word);
+      folly::storeUnaligned<uint64_t>(target, word);
     } else {
       memcpy(target, &word, numValueBits - i * 8);
     }

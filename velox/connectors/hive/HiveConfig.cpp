@@ -159,6 +159,15 @@ int32_t HiveConfig::prefetchRowGroups() const {
   return config_->get<int32_t>(kPrefetchRowGroups, 1);
 }
 
+size_t HiveConfig::parallelUnitLoadCount(
+    const config::ConfigBase* session) const {
+  auto count = session->get<size_t>(
+      kParallelUnitLoadCountSession,
+      config_->get<size_t>(kParallelUnitLoadCount, 0));
+  VELOX_CHECK_LE(count, 100, "parallelUnitLoadCount too large: {}", count);
+  return count;
+}
+
 int32_t HiveConfig::loadQuantum(const config::ConfigBase* session) const {
   return session->get<int32_t>(
       kLoadQuantumSession, config_->get<int32_t>(kLoadQuantum, 8 << 20));
@@ -202,6 +211,14 @@ uint64_t HiveConfig::sortWriterFinishTimeSliceLimitMs(
       kSortWriterFinishTimeSliceLimitMsSession,
       config_->get<uint64_t>(kSortWriterFinishTimeSliceLimitMs, 5'000));
 }
+uint64_t HiveConfig::maxTargetFileSizeBytes(
+    const config::ConfigBase* session) const {
+  return config::toCapacity(
+      session->get<std::string>(
+          kMaxTargetFileSizeSession,
+          config_->get<std::string>(kMaxTargetFileSize, "0B")),
+      config::CapacityUnit::BYTE);
+}
 
 uint64_t HiveConfig::footerEstimatedSize() const {
   return config_->get<uint64_t>(kFooterEstimatedSize, 256UL << 10);
@@ -235,19 +252,37 @@ bool HiveConfig::readStatsBasedFilterReorderDisabled(
       config_->get<bool>(kReadStatsBasedFilterReorderDisabled, false));
 }
 
-std::string HiveConfig::hiveLocalDataPath() const {
-  return config_->get<std::string>(kLocalDataPath, "");
-}
-
-std::string HiveConfig::hiveLocalFileFormat() const {
-  return config_->get<std::string>(kLocalFileFormat, "");
-}
-
 bool HiveConfig::preserveFlatMapsInMemory(
     const config::ConfigBase* session) const {
   return session->get<bool>(
       kPreserveFlatMapsInMemorySession,
       config_->get<bool>(kPreserveFlatMapsInMemory, false));
+}
+
+bool HiveConfig::indexEnabled(const config::ConfigBase* session) const {
+  return session->get<bool>(
+      kIndexEnabledSession, config_->get<bool>(kIndexEnabled, false));
+}
+
+uint32_t HiveConfig::maxRowsPerIndexRequest(
+    const config::ConfigBase* session) const {
+  return session->get<uint32_t>(
+      kMaxRowsPerIndexRequestSession,
+      config_->get<uint32_t>(kMaxRowsPerIndexRequest, 0));
+}
+
+std::string HiveConfig::user(const config::ConfigBase* session) const {
+  return session->get<std::string>(kUser, config_->get<std::string>(kUser, ""));
+}
+
+std::string HiveConfig::source(const config::ConfigBase* session) const {
+  return session->get<std::string>(
+      kSource, config_->get<std::string>(kSource, ""));
+}
+
+std::string HiveConfig::schema(const config::ConfigBase* session) const {
+  return session->get<std::string>(
+      kSchema, config_->get<std::string>(kSchema, ""));
 }
 
 } // namespace facebook::velox::connector::hive

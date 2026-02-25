@@ -18,6 +18,7 @@
 #include "velox/common/base/Counters.h"
 #include "velox/common/base/StatsReporter.h"
 #include "velox/common/testutil/TestValue.h"
+#include "velox/exec/OperatorType.h"
 #include "velox/exec/OperatorUtils.h"
 #include "velox/exec/Task.h"
 #include "velox/expression/FieldReference.h"
@@ -118,15 +119,18 @@ HashProbe::HashProbe(
           joinNode->outputType(),
           operatorId,
           joinNode->id(),
-          "HashProbe",
+          OperatorType::kHashProbe,
           joinNode->canSpill(driverCtx->queryConfig())
-              ? driverCtx->makeSpillConfig(operatorId)
+              ? driverCtx->makeSpillConfig(operatorId, OperatorType::kHashProbe)
               : std::nullopt),
       outputBatchSize_{outputBatchRows()},
       joinNode_(std::move(joinNode)),
       joinType_{joinNode_->joinType()},
       nullAware_{joinNode_->isNullAware()},
       probeType_(joinNode_->sources()[0]->outputType()),
+      canOutputBuildRowsInParallel_(
+          driverCtx->queryConfig().parallelOutputJoinBuildRowsEnabled() &&
+          !canSpill()),
       joinBridge_(operatorCtx_->task()->getHashJoinBridgeLocked(
           operatorCtx_->driverCtx()->splitGroupId,
           planNodeId())),
@@ -384,10 +388,21 @@ void HashProbe::pushdownDynamicFilters() {
         if (dynamicFiltersProducedOnChannels_.contains(sourceChannel)) {
           return true;
         }
-        filter = table_->hashers()[sourceChannel]->getFilter(false);
+        auto& hasher = *table_->hashers()[sourceChannel];
+        filter = hasher.getFilter(false);
         if (!filter) {
-          return false;
+          filter = hasher.getBloomFilter();
+          if (!filter) {
+            return false;
+          }
+          auto* bloomFilter =
+              checkedPointerCast<const common::BigintValuesUsingBloomFilter>(
+                  filter.get());
+          addRuntimeStat(
+              std::string(HashProbe::kBloomFilterSize),
+              RuntimeCounter(bloomFilter->blocksByteSize()));
         }
+        dynamicFiltersProducedOnChannels_.insert(sourceChannel);
         for (auto* peer : findPeerOperators()) {
           peer->dynamicFiltersProducedOnChannels_.insert(sourceChannel);
         }
@@ -399,7 +414,7 @@ void HashProbe::pushdownDynamicFilters() {
   //  * build side has no dependent columns.
   if (keyChannels_.size() == 1 && !table_->hasDuplicateKeys() &&
       tableOutputProjections_.empty() && !filter_ && numFilters > 0 &&
-      !isRightJoin(joinType_)) {
+      !table_->hashers()[0]->getBloomFilter() && !isRightJoin(joinType_)) {
     canReplaceWithDynamicFilter_ = true;
   }
 }
@@ -460,6 +475,9 @@ void HashProbe::asyncWaitForHashTable() {
        (isRightSemiProjectJoin(joinType_) && !nullAware_) ||
        isRightJoin(joinType_)) &&
       table_->hashMode() != BaseHashTable::HashMode::kHash && !isSpillInput() &&
+      operatorCtx_->driverCtx()
+          ->queryConfig()
+          .hashProbeDynamicFilterPushdownEnabled() &&
       !hasMoreSpillData()) {
     // Find out whether there are any upstream operators that can accept dynamic
     // filters on all or a subset of the join keys. Create dynamic filters to
@@ -493,7 +511,6 @@ void HashProbe::prepareForSpillRestore() {
   restoringPartitionId_.reset();
   spillInputPartitionIds_.clear();
   spillOutputReader_.reset();
-  lastProbeIterator_.reset();
 
   VELOX_CHECK(promises_.empty() || lastProber_);
   if (!lastProber_) {
@@ -634,7 +651,6 @@ BlockingReason HashProbe::isBlocked(ContinueFuture* future) {
       }
       break;
     case ProbeOperatorState::kWaitForPeers:
-      VELOX_CHECK(canSpill());
       if (!future_.valid()) {
         setRunning();
       }
@@ -863,28 +879,49 @@ void HashProbe::fillOutput(vector_size_t size) {
 }
 
 RowVectorPtr HashProbe::getBuildSideOutput() {
-  auto* outputTableRows =
+  if (buildSideOutputRowContainerId_ == -1) {
+    buildSideOutputRowContainerId_ =
+        joinBridge_->getAndIncrementUnclaimedRowContainerId();
+    lastProbeIterator_.reset();
+  }
+  if (buildSideOutputRowContainerId_ >= table_->numRowContainers()) {
+    return nullptr;
+  }
+
+  char** outputTableRows =
       initBuffer<char*>(outputTableRows_, outputTableRowsCapacity_, pool());
-  int32_t numOut;
-  if (isRightSemiFilterJoin(joinType_)) {
-    numOut = table_->listProbedRows(
-        &lastProbeIterator_,
-        outputTableRowsCapacity_,
-        RowContainer::kUnlimited,
-        outputTableRows);
-  } else if (isRightSemiProjectJoin(joinType_)) {
-    numOut = table_->listAllRows(
-        &lastProbeIterator_,
-        outputTableRowsCapacity_,
-        RowContainer::kUnlimited,
-        outputTableRows);
-  } else {
-    // Must be a right join or full join.
-    numOut = table_->listNotProbedRows(
-        &lastProbeIterator_,
-        outputTableRowsCapacity_,
-        RowContainer::kUnlimited,
-        outputTableRows);
+  int32_t numOut{0};
+  while (numOut == 0 &&
+         buildSideOutputRowContainerId_ < table_->numRowContainers()) {
+    if (isRightSemiFilterJoin(joinType_)) {
+      numOut = table_->listProbedRows(
+          lastProbeIterator_,
+          buildSideOutputRowContainerId_,
+          outputTableRowsCapacity_,
+          RowContainer::kUnlimited,
+          outputTableRows);
+    } else if (isRightSemiProjectJoin(joinType_)) {
+      numOut = table_->listAllRows(
+          lastProbeIterator_,
+          buildSideOutputRowContainerId_,
+          outputTableRowsCapacity_,
+          RowContainer::kUnlimited,
+          outputTableRows);
+
+    } else {
+      // Must be a right join or full join.
+      numOut = table_->listNotProbedRows(
+          lastProbeIterator_,
+          buildSideOutputRowContainerId_,
+          outputTableRowsCapacity_,
+          RowContainer::kUnlimited,
+          outputTableRows);
+    }
+    if (numOut == 0) {
+      buildSideOutputRowContainerId_ =
+          joinBridge_->getAndIncrementUnclaimedRowContainerId();
+      lastProbeIterator_.reset();
+    }
   }
   if (numOut == 0) {
     return nullptr;
@@ -908,9 +945,9 @@ RowVectorPtr HashProbe::getBuildSideOutput() {
 
   if (isRightSemiProjectJoin(joinType_)) {
     // Populate 'match' column.
-    if (noInput_) {
+    if (noInput_ && nullAware_) {
       // Probe side is empty. All rows should return 'match = false', even ones
-      // with a null join key.
+      // with a null join key. (This applies to null-aware joins only.)
       matchColumn() = createConstantFalse(numOut, pool());
     } else {
       table_->rows()->extractProbedFlags(
@@ -948,6 +985,12 @@ bool HashProbe::canSpill() const {
   if (!Operator::canSpill()) {
     return false;
   }
+  // Hash table caching is incompatible with spilling. When the table is
+  // cached and shared across tasks, clearing it after probe would corrupt
+  // the cache for subsequent tasks.
+  if (joinNode_->useHashTableCache()) {
+    return false;
+  }
   if (operatorCtx_->task()->hasMixedExecutionGroupJoin(joinNode_.get())) {
     return operatorCtx_->driverCtx()
                ->queryConfig()
@@ -978,16 +1021,11 @@ void HashProbe::checkStateTransition(ProbeOperatorState state) {
   VELOX_CHECK_NE(state_, state);
   switch (state) {
     case ProbeOperatorState::kRunning:
-      if (!canSpill()) {
-        VELOX_CHECK_EQ(state_, ProbeOperatorState::kWaitForBuild);
-      } else {
-        VELOX_CHECK(
-            state_ == ProbeOperatorState::kWaitForBuild ||
-            state_ == ProbeOperatorState::kWaitForPeers);
-      }
+      VELOX_CHECK(
+          state_ == ProbeOperatorState::kWaitForBuild ||
+          state_ == ProbeOperatorState::kWaitForPeers);
       break;
     case ProbeOperatorState::kWaitForPeers:
-      VELOX_CHECK(canSpill());
       [[fallthrough]];
     case ProbeOperatorState::kWaitForBuild:
       [[fallthrough]];
@@ -1033,7 +1071,7 @@ RowVectorPtr HashProbe::getOutputInternal(bool toSpillOutput) {
       return nullptr;
     }
 
-    if (needLastProbe() && lastProber_) {
+    if (needLastProbe() && (canOutputBuildRowsInParallel_ || lastProber_)) {
       auto output = getBuildSideOutput();
       if (output != nullptr) {
         return output;
@@ -1085,7 +1123,9 @@ RowVectorPtr HashProbe::getOutputInternal(bool toSpillOutput) {
   const auto inputSize = input_->size();
 
   if (replacedWithDynamicFilter_) {
-    addRuntimeStat("replacedWithDynamicFilterRows", RuntimeCounter(inputSize));
+    addRuntimeStat(
+        std::string(HashProbe::kReplacedWithDynamicFilterRows),
+        RuntimeCounter(inputSize));
     auto output = Operator::fillOutput(inputSize, nullptr);
     input_ = nullptr;
     return output;
@@ -1176,6 +1216,13 @@ RowVectorPtr HashProbe::getOutputInternal(bool toSpillOutput) {
     numOut = evalFilter(numOut);
 
     if (numOut == 0) {
+      // The hash probe might get stuck in the output loop if the filter is
+      // highly selective. This does not apply if the call is made during
+      // spilling, because we cannot break out and resume when the operator is
+      // undergoing spilling.
+      if (!toSpillOutput && shouldYield()) {
+        return nullptr;
+      }
       continue;
     }
 
@@ -1700,21 +1747,34 @@ void HashProbe::noMoreInputInternal() {
         spillInputPartitionIds_.size(),
         inputSpiller_->state().spilledPartitionIdSet().size());
     inputSpiller_->finishSpill(inputSpillPartitionSet_);
-    VELOX_CHECK_EQ(spillStats_->rlock()->spillSortTimeNanos, 0);
+    VELOX_CHECK_EQ(
+        spillStats_->spillSortTimeNanos.load(std::memory_order_relaxed), 0);
   }
 
-  const bool hasSpillEnabled = canSpill();
   std::vector<ContinuePromise> promises;
   std::vector<std::shared_ptr<Driver>> peers;
-  // The last operator to finish processing inputs is responsible for
-  // producing build-side rows based on the join.
+
+  // Reset flags about outputting build-side rows in parallel.
+  buildSideOutputRowContainerId_ = -1;
+
+  // NOTE: if 'canSpill()' is false and 'outputBuildRowsInParallel' is
+  // false too, then a hash probe operator doesn't need to wait for all the
+  // other peers to finish probe processing. If 'canSpill()' is true, it
+  // needs to wait and might expect spill gets triggered by the other probe
+  // operators, or there is previously spilled table partition(s) that needs to
+  // restore. If 'outputBuildRowsInParallel', it needs to wait to all drivers
+  // start outputting build-side rows in parallel only after all drivers finish
+  // probe processing.
+  const bool outputBuildRowsInParallel =
+      canOutputBuildRowsInParallel_ && needLastProbe();
+  const bool shouldBlock = canSpill() || outputBuildRowsInParallel;
   if (!operatorCtx_->task()->allPeersFinished(
           planNodeId(),
           operatorCtx_->driver(),
-          hasSpillEnabled ? &future_ : nullptr,
-          hasSpillEnabled ? promises_ : promises,
+          shouldBlock ? &future_ : nullptr,
+          shouldBlock ? promises_ : promises,
           peers)) {
-    if (hasSpillEnabled) {
+    if (shouldBlock) {
       VELOX_CHECK(future_.valid());
       setState(ProbeOperatorState::kWaitForPeers);
       VELOX_DCHECK(promises_.empty());
@@ -1725,13 +1785,14 @@ void HashProbe::noMoreInputInternal() {
   }
 
   VELOX_CHECK(promises.empty());
-  // NOTE: if 'hasSpillEnabled' is false, then a hash probe operator doesn't
-  // need to wait for all the other peers to finish probe processing.
-  // Otherwise, it needs to wait and might expect spill gets triggered by the
-  // other probe operators, or there is previously spilled table partition(s)
-  // that needs to restore.
-  VELOX_CHECK(hasSpillEnabled || peers.empty());
   lastProber_ = true;
+  joinBridge_->resetUnclaimedRowContainerId();
+  // If 'outputBuildRowsInParallel' is true, wake up all peers to start
+  // outputting build-side rows in parallel. Otherwise, only let the last prober
+  // proceed.
+  if (outputBuildRowsInParallel) {
+    wakeupPeerOperators();
+  }
 }
 
 bool HashProbe::isFinished() {
@@ -1775,8 +1836,9 @@ void HashProbe::ensureOutputFits() {
   }
 
   // We only need to reserve memory for output if need.
-  if (input_ == nullptr &&
-      (hasMoreInput() || !(needLastProbe() && lastProber_))) {
+  bool outputBuildSideRows =
+      needLastProbe() && (canOutputBuildRowsInParallel_ || lastProber_);
+  if (input_ == nullptr && (hasMoreInput() || !outputBuildSideRows)) {
     return;
   }
 
@@ -2048,7 +2110,8 @@ void HashProbe::checkMaxSpillLevel(
           << "Exceeded spill level limit: " << config->maxSpillLevel
           << ", and disable spilling for memory pool: " << pool()->name();
       exceededMaxSpillLevelLimit_ = true;
-      ++spillStats_->wlock()->spillMaxLevelExceededCount;
+      spillStats_->spillMaxLevelExceededCount.fetch_add(
+          1, std::memory_order_relaxed);
       return;
     }
   }

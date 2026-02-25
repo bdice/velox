@@ -15,6 +15,8 @@
  */
 #pragma once
 
+#include <string_view>
+
 #include "velox/core/PlanNode.h"
 #include "velox/exec/Operator.h"
 #include "velox/exec/ScaledScanController.h"
@@ -61,11 +63,42 @@ class TableScan : public SourceOperator {
   ///
   /// NOTE: we only report the number of running scan drivers at the point that
   /// all the splits have been dispatched.
-  static inline const std::string kNumRunningScaleThreads{
-      "numRunningScaleThreads"};
+  static constexpr std::string_view kNumRunningScaleThreads =
+      "numRunningScaleThreads";
+
+  /// Time spent reading from the data source.
+  static constexpr std::string_view kDataSourceReadWallNanos =
+      "dataSourceReadWallNanos";
+
+  /// Number of splits that started background preload.
+  static constexpr std::string_view kPreloadedSplits = "preloadedSplits";
+
+  /// Number of preloaded splits that finished before being read.
+  static constexpr std::string_view kReadyPreloadedSplits =
+      "readyPreloadedSplits";
+
+  /// Size of the connector split.
+  static constexpr std::string_view kConnectorSplitSize = "connectorSplitSize";
+
+  /// Time waiting for a preloaded split to become available.
+  static constexpr std::string_view kWaitForPreloadSplitNanos =
+      "waitForPreloadSplitNanos";
+
+  /// Time for preload split preparation.
+  static constexpr std::string_view kPreloadSplitPrepareTimeNanos =
+      "preloadSplitPrepareTimeNanos";
+
+  /// Time spent adding a split to the data source.
+  static constexpr std::string_view kDataSourceAddSplitWallNanos =
+      "dataSourceAddSplitWallNanos";
 
   std::shared_ptr<ScaledScanController> testingScaledController() const {
     return scaledController_;
+  }
+
+  /// Returns the current read batch size. Used for testing.
+  vector_size_t testingReadBatchSize() const {
+    return readBatchSize_;
   }
 
  private:
@@ -98,6 +131,10 @@ class TableScan : public SourceOperator {
   // the scan driver memory usage and check to see if we need to scale up scan
   // processing or not.
   void tryScaleUp();
+
+  // Calculates the batch size to read based on available row size information.
+  // Returns the number of rows to read in the next batch.
+  int32_t calculateBatchSize(int64_t currentEstimatedRowSize);
 
   const connector::ConnectorTableHandlePtr tableHandle_;
   const connector::ColumnHandleMap columnHandles_;
@@ -140,6 +177,10 @@ class TableScan : public SourceOperator {
   int32_t numReadyPreloadedSplits_{0};
 
   double maxFilteringRatio_{0};
+
+  // Row size estimate from the file reader. It is set to the last known
+  // estimated row size from the current split reader or the previous ones.
+  int64_t fileEstimatedRowSize_{connector::DataSource::kUnknownRowSize};
 
   // String shown in ExceptionContext inside DataSource and LazyVector loading.
   std::string debugString_;

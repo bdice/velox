@@ -417,8 +417,18 @@ bool RowVector::isWritable() const {
   return isNullsWritable();
 }
 
+void RowVector::transferOrCopyTo(velox::memory::MemoryPool* pool) {
+  BaseVector::transferOrCopyTo(pool);
+  for (auto& child : children_) {
+    child->transferOrCopyTo(pool);
+  }
+  if (rawVectorForBatchReader_) {
+    rawVectorForBatchReader_->transferOrCopyTo(pool);
+  }
+}
+
 uint64_t RowVector::estimateFlatSize() const {
-  uint64_t total = BaseVector::retainedSize();
+  uint64_t total = BaseVector::retainedSizeImpl();
   for (const auto& child : children_) {
     if (child) {
       total += child->estimateFlatSize();
@@ -623,7 +633,9 @@ void RowVector::validate(const VectorValidateOptions& options) const {
       if (child->size() < size()) {
         VELOX_CHECK_NOT_NULL(
             nulls_,
-            "Child vector has size less than parent and parent has no nulls.");
+            "Child vector has size {} less than parent and parent has no nulls {}.",
+            child->size(),
+            size());
 
         VELOX_CHECK_GT(
             child->size(),
@@ -921,6 +933,18 @@ bool ArrayVectorBase::hasOverlappingRanges(
   return false;
 }
 
+void ArrayVectorBase::transferOrCopyTo(velox::memory::MemoryPool* pool) {
+  BaseVector::transferOrCopyTo(pool);
+  if (!offsets_->transferTo(pool)) {
+    offsets_ = AlignedBuffer::copy<vector_size_t>(offsets_, pool);
+    rawOffsets_ = offsets_->as<vector_size_t>();
+  }
+  if (!sizes_->transferTo(pool)) {
+    sizes_ = AlignedBuffer::copy<vector_size_t>(sizes_, pool);
+    rawSizes_ = sizes_->as<vector_size_t>();
+  }
+}
+
 void ArrayVectorBase::ensureNullRowsEmpty() {
   if (!rawNulls_) {
     return;
@@ -1193,8 +1217,13 @@ bool ArrayVector::isWritable() const {
   return isNullsWritable() && BaseVector::isVectorWritable(elements_);
 }
 
+void ArrayVector::transferOrCopyTo(velox::memory::MemoryPool* pool) {
+  ArrayVectorBase::transferOrCopyTo(pool);
+  elements_->transferOrCopyTo(pool);
+}
+
 uint64_t ArrayVector::estimateFlatSize() const {
-  return BaseVector::retainedSize() + offsets_->capacity() +
+  return BaseVector::retainedSizeImpl() + offsets_->capacity() +
       sizes_->capacity() + elements_->estimateFlatSize();
 }
 
@@ -1513,8 +1542,14 @@ bool MapVector::isWritable() const {
       BaseVector::isVectorWritable(values_);
 }
 
+void MapVector::transferOrCopyTo(velox::memory::MemoryPool* pool) {
+  ArrayVectorBase::transferOrCopyTo(pool);
+  keys_->transferOrCopyTo(pool);
+  values_->transferOrCopyTo(pool);
+}
+
 uint64_t MapVector::estimateFlatSize() const {
-  return BaseVector::retainedSize() + offsets_->capacity() +
+  return BaseVector::retainedSizeImpl() + offsets_->capacity() +
       sizes_->capacity() + keys_->estimateFlatSize() +
       values_->estimateFlatSize();
 }

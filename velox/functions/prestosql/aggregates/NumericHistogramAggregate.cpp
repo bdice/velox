@@ -16,7 +16,6 @@
 #include "velox/common/base/IOUtils.h"
 #include "velox/exec/Aggregate.h"
 #include "velox/expression/FunctionSignature.h"
-#include "velox/functions/prestosql/aggregates/AggregateNames.h"
 
 #include <algorithm>
 #include <limits>
@@ -475,7 +474,7 @@ class NumericHistogramAggregate<TValue, TWeight, 3> {
 } // namespace
 
 void registerNumericHistogramAggregate(
-    const std::string& prefix,
+    const std::vector<std::string>& names,
     bool withCompanionFunctions,
     bool overwrite) {
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures;
@@ -485,33 +484,35 @@ void registerNumericHistogramAggregate(
   const auto weightTypes = {"real", "double"};
   for (const auto& valueType : valueTypes) {
     const auto returnType = fmt::format("map({}, {})", valueType, valueType);
-    signatures.push_back(exec::AggregateFunctionSignatureBuilder()
-                             .returnType(returnType)
-                             .intermediateType("varbinary")
-                             .argumentType("bigint")
-                             .argumentType(valueType)
-                             .build());
+    signatures.push_back(
+        exec::AggregateFunctionSignatureBuilder()
+            .returnType(returnType)
+            .intermediateType("varbinary")
+            .argumentType("bigint")
+            .argumentType(valueType)
+            .build());
     for (const auto& weightType : weightTypes) {
-      signatures.push_back(exec::AggregateFunctionSignatureBuilder()
-                               .returnType(returnType)
-                               .intermediateType("varbinary")
-                               .argumentType("bigint")
-                               .argumentType(valueType)
-                               .argumentType(weightType)
-                               .build());
+      signatures.push_back(
+          exec::AggregateFunctionSignatureBuilder()
+              .returnType(returnType)
+              .intermediateType("varbinary")
+              .argumentType("bigint")
+              .argumentType(valueType)
+              .argumentType(weightType)
+              .build());
     }
   }
-  auto name = prefix + kNumericHistogram;
 
   exec::registerAggregateFunction(
-      name,
-      signatures,
-      [name](
+      names,
+      std::move(signatures),
+      [names](
           core::AggregationNode::Step step,
           const std::vector<TypePtr>& argTypes,
           const TypePtr& resultType,
           const core::QueryConfig& /*config*/)
           -> std::unique_ptr<exec::Aggregate> {
+        const std::string& name = names.front();
         VELOX_USER_CHECK_GE(
             argTypes.size(), 2, "{} takes at least two arguments", name);
         VELOX_USER_CHECK_LE(

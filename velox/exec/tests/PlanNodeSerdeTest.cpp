@@ -16,6 +16,7 @@
 #include "velox/common/base/tests/GTestUtils.h"
 #include "velox/connectors/hive/HiveConnector.h"
 #include "velox/exec/PartitionFunction.h"
+#include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
@@ -172,6 +173,14 @@ TEST_F(PlanNodeSerdeTest, markDistinct) {
   auto plan = PlanBuilder()
                   .values({data_})
                   .markDistinct("marker", {"c0", "c1", "c2"})
+                  .planNode();
+  testSerde(plan);
+}
+
+TEST_F(PlanNodeSerdeTest, enforceDistinct) {
+  auto plan = PlanBuilder()
+                  .values({data_})
+                  .enforceDistinct({"c0", "c1", "c2"}, "Test error message")
                   .planNode();
   testSerde(plan);
 }
@@ -656,14 +665,44 @@ TEST_F(PlanNodeSerdeTest, rowNumber) {
 }
 
 TEST_F(PlanNodeSerdeTest, scan) {
-  auto plan = PlanBuilder(pool_.get())
-                  .tableScan(
-                      ROW({"a", "b", "c", "d"},
-                          {BIGINT(), BIGINT(), BOOLEAN(), DOUBLE()}),
-                      {"a < 5", "b = 7", "c = true", "d > 0.01"},
-                      "a + b < 100")
-                  .planNode();
-  testSerde(plan);
+  {
+    auto plan = PlanBuilder(pool_.get())
+                    .tableScan(
+                        ROW({"a", "b", "c", "d"},
+                            {BIGINT(), BIGINT(), BOOLEAN(), DOUBLE()}),
+                        {"a < 5", "b = 7", "c = true", "d > 0.01"},
+                        "a + b < 100")
+                    .planNode();
+    testSerde(plan);
+  }
+
+  {
+    auto plan =
+        PlanBuilder()
+            .startTableScan()
+            .outputType(ROW({"x"}, {BIGINT()}))
+            .assignments(
+                {{"x", HiveConnectorTestBase::regularColumn("a", BIGINT())}})
+            .dataColumns(ROW({"a", "b"}, {BIGINT(), BIGINT()}))
+            .filterColumnHandles({
+                HiveConnectorTestBase::partitionKey("ds", VARCHAR()),
+                HiveConnectorTestBase::regularColumn("a", BIGINT()),
+            })
+            .remainingFilter("length(ds) + a % 2 > 0")
+            .endTableScan()
+            .planNode();
+    testSerde(plan);
+  }
+
+  {
+    auto plan = PlanBuilder()
+                    .startTableScan()
+                    .outputType(ROW({"x"}, {BIGINT()}))
+                    .sampleRate(0.5)
+                    .endTableScan()
+                    .planNode();
+    testSerde(plan);
+  }
 }
 
 TEST_F(PlanNodeSerdeTest, topNRowNumber) {

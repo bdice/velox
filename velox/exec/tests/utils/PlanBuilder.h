@@ -35,9 +35,16 @@ enum class Table : uint8_t;
 
 namespace facebook::velox::exec::test {
 
+struct AggregationConfig {
+  std::vector<std::string> groupingKeys;
+  std::vector<std::string> aggregates;
+};
+
 struct PushdownConfig {
   common::SubfieldFilters subfieldFiltersMap;
   std::string remainingFilter;
+  // Aggregation pushdown configuration
+  std::optional<AggregationConfig> aggregationConfig;
 };
 
 /// A builder class with fluent API for building query plans. Plans are built
@@ -289,6 +296,8 @@ class PlanBuilder {
     /// AND'ed with all the subfieldFilters.
     TableScanBuilder& remainingFilter(std::string remainingFilter);
 
+    TableScanBuilder& sampleRate(double sampleRate);
+
     /// @param dataColumns can be different from 'outputType' for the purposes
     /// of testing queries using missing columns. It is used, if specified, for
     /// parseExpr call and as 'dataColumns' for the TableHandle. You supply more
@@ -316,12 +325,25 @@ class PlanBuilder {
       return *this;
     }
 
+    TableScanBuilder& filterColumnHandles(
+        std::vector<connector::hive::HiveColumnHandlePtr> filterColumnHandles) {
+      filterColumnHandles_ = std::move(filterColumnHandles);
+      return *this;
+    }
+
     /// @param assignments Optional ColumnHandles.
     /// outputType names should match the keys in the 'assignments' map. The
     /// 'assignments' map may contain more columns than 'outputType' if some
     /// columns are only used by pushed-down filters.
     TableScanBuilder& assignments(connector::ColumnHandleMap assignments) {
       assignments_ = std::move(assignments);
+      return *this;
+    }
+
+    /// @param indexColumns Names of columns that form the index key for the
+    /// table. When set, enables index-based lookups.
+    TableScanBuilder& indexColumns(std::vector<std::string> indexColumns) {
+      indexColumns_ = std::move(indexColumns);
       return *this;
     }
 
@@ -340,7 +362,10 @@ class PlanBuilder {
     std::string connectorId_{kHiveDefaultConnectorId};
     RowTypePtr outputType_;
     core::ExprPtr remainingFilter_;
+    double sampleRate_{1.0};
     RowTypePtr dataColumns_;
+    std::vector<std::string> indexColumns_;
+    std::vector<connector::hive::HiveColumnHandlePtr> filterColumnHandles_;
     std::unordered_map<std::string, std::string> columnAliases_;
     connector::ConnectorTableHandlePtr tableHandle_;
     connector::ColumnHandleMap assignments_;
@@ -395,14 +420,21 @@ class PlanBuilder {
       return *this;
     }
 
-    IndexLookupJoinBuilder& includeMatchColumn(bool includeMatchColumn) {
-      includeMatchColumn_ = includeMatchColumn;
+    IndexLookupJoinBuilder& hasMarker(bool hasMarker) {
+      hasMarker_ = hasMarker;
       return *this;
     }
 
     IndexLookupJoinBuilder& outputLayout(
         std::vector<std::string> outputLayout) {
       outputLayout_ = std::move(outputLayout);
+      return *this;
+    }
+
+    /// @param filter SQL expression for the additional join filter. Can
+    /// use columns from both probe and build sides of the join.
+    IndexLookupJoinBuilder& filter(std::string filter) {
+      filter_ = std::move(filter);
       return *this;
     }
 
@@ -427,7 +459,8 @@ class PlanBuilder {
     std::vector<std::string> rightKeys_;
     core::TableScanNodePtr indexSource_;
     std::vector<std::string> joinConditions_;
-    bool includeMatchColumn_{false};
+    std::string filter_;
+    bool hasMarker_{false};
     std::vector<std::string> outputLayout_;
     core::JoinType joinType_{core::JoinType::kInner};
   };
@@ -726,7 +759,10 @@ class PlanBuilder {
   /// Add a FilterNode using specified SQL expression.
   ///
   /// @param filter SQL expression of type boolean.
-  PlanBuilder& filter(const std::string& filter);
+  PlanBuilder& filter(const std::string& filterExpr);
+
+  /// Same as above, but takes an untyped expression.
+  PlanBuilder& filter(const core::ExprPtr& filterExpr);
 
   /// Similar to filter() except 'optionalFilter' could be empty and the
   /// function will skip creating a FilterNode in that case.
@@ -817,6 +853,12 @@ class PlanBuilder {
   /// output of the previous operator.
   /// @param ensureFiles When this option is set the HiveDataSink will always
   /// create a file even if there is no data.
+  /// @param commitStrategy The commit strategy to use for the table write
+  /// operation, default is kNoCommit.
+  /// @param insertTableHandle Encapsulates information needed to write data
+  /// to a table through a connector. If not specified, tableWrite will build
+  /// a HiveInsertTableHandle with columnHandles, bucketProperty and
+  /// locationHandle.
   PlanBuilder& tableWrite(
       const std::string& outputDirectoryPath,
       const std::vector<std::string>& partitionBy,
@@ -835,7 +877,8 @@ class PlanBuilder {
       const RowTypePtr& schema = nullptr,
       const bool ensureFiles = false,
       const connector::CommitStrategy commitStrategy =
-          connector::CommitStrategy::kNoCommit);
+          connector::CommitStrategy::kNoCommit,
+      std::shared_ptr<core::InsertTableHandle> insertTableHandle = nullptr);
 
   /// Add a TableWriteMergeNode.
   PlanBuilder& tableWriteMerge();
@@ -1014,7 +1057,8 @@ class PlanBuilder {
       const std::vector<std::string>& aggregates,
       const std::vector<std::string>& masks,
       core::AggregationNode::Step step,
-      bool ignoreNullKeys);
+      bool ignoreNullKeys,
+      bool noGroupsSpanBatches = false);
 
   /// Add a GroupIdNode using the specified grouping keys, grouping sets,
   /// aggregation inputs and a groupId column name.
@@ -1302,6 +1346,9 @@ class PlanBuilder {
   PlanBuilder& spatialJoin(
       const core::PlanNodePtr& right,
       const std::string& joinCondition,
+      const std::string& probeGeometry,
+      const std::string& buildGeometry,
+      const std::optional<std::string>& radius,
       const std::vector<std::string>& outputLayout,
       core::JoinType joinType = core::JoinType::kInner);
 
@@ -1315,6 +1362,11 @@ class PlanBuilder {
   /// node. Second input is specified in 'right' parameter and must be a
   /// table source with the connector table handle with index lookup support.
   ///
+  /// @param leftKeys Join keys from the probe side, the preceding plan node.
+  /// Cannot be empty.
+  /// @param rightKeys Join keys from the index lookup side, the plan node
+  /// specified in 'right' parameter. The number and types of left and right
+  /// keys must be the same.
   /// @param right The right input source with index lookup support.
   /// @param joinConditions SQL expressions as the join conditions. Each join
   /// condition must use columns from both sides. For the right side, it can
@@ -1327,18 +1379,23 @@ class PlanBuilder {
   /// where "a" is the index column from right side and "b", "c" are either
   /// condition column from left side or a constant but at least one of them
   /// must not be constant. They all have the same type.
-  /// @param joinType Type of the join supported: inner, left.
-  /// @param includeMatchColumn if true, 'outputLayout' should include a boolean
+  /// @param filter SQL expression for the additional join filter to apply on
+  /// join results. This supports filters that can't be converted into join
+  /// conditions or lookup conditions. Can be an empty string if no additional
+  /// filter is needed.
+  /// @param hasMarker if true, 'outputLayout' should include a boolean
   /// column at the end to indicate if a join output row has a match or not.
   /// This only applies for left join.
-  ///
-  /// See hashJoin method for the description of the other parameters.
+  /// @param outputLayout Output layout consisting of columns from probe and
+  /// build sides.
+  /// @param joinType Type of the join supported: inner, left.
   PlanBuilder& indexLookupJoin(
       const std::vector<std::string>& leftKeys,
       const std::vector<std::string>& rightKeys,
       const core::TableScanNodePtr& right,
       const std::vector<std::string>& joinConditions,
-      bool includeMatchColumn,
+      const std::string& filter,
+      bool hasMarker,
       const std::vector<std::string>& outputLayout,
       core::JoinType joinType = core::JoinType::kInner);
 
@@ -1360,16 +1417,16 @@ class PlanBuilder {
   /// @param ordinalColumn An optional name for the 'ordinal' column to produce.
   /// This column contains the index of the element of the unnested array or
   /// map. If not specified, the output will not contain this column.
-  /// @param emptyUnnestValueName An optional name for the
-  /// 'emptyUnnestValue' column to produce. This column contains a boolean
-  /// indicating if the output row has empty unnest value or not. If not
-  /// specified, the output will not contain this column and the unnest operator
-  /// also skips producing output rows with empty unnest value.
+  /// @param markerName An optional name for the marker column to produce.
+  /// This column contains a boolean indicating whether the output row has
+  /// non-empty unnested value. If not specified, the output will not contain
+  /// this column and the unnest operator also skips producing output rows
+  /// with empty unnest value.
   PlanBuilder& unnest(
       const std::vector<std::string>& replicateColumns,
       const std::vector<std::string>& unnestColumns,
       const std::optional<std::string>& ordinalColumn = std::nullopt,
-      const std::optional<std::string>& emptyUnnestValueName = std::nullopt);
+      const std::optional<std::string>& markerName = std::nullopt);
 
   /// Add a WindowNode to compute one or more windowFunctions.
   /// @param windowFunctions A list of one or more window function SQL like
@@ -1428,6 +1485,32 @@ class PlanBuilder {
   PlanBuilder& markDistinct(
       std::string markerKey,
       const std::vector<std::string>& distinctKeys);
+
+  /// Add an EnforceDistinctNode to ensure input has unique values for the
+  /// specified keys at runtime. Throws with the specified error message if
+  /// duplicates are found.
+  /// @param distinctKeys List of columns that must have unique values.
+  /// @param errorMessage Error message to include in the exception when
+  /// duplicates are found.
+  /// @param preGroupedKeys Optional subset of distinctKeys that input is
+  /// already clustered on. When equal to distinctKeys, uses streaming
+  /// enforcement.
+  PlanBuilder& enforceDistinct(
+      const std::vector<std::string>& distinctKeys,
+      std::string errorMessage,
+      const std::vector<std::string>& preGroupedKeys = {});
+
+  /// Add an EnforceDistinctNode to ensure pre-grouped input has unique
+  /// values for the specified keys. Equivalent to calling enforceDistinct with
+  /// preGroupedKeys equal to distinctKeys, which uses the streaming
+  /// implementation.
+  /// @param distinctKeys List of columns that must have unique values. Input
+  /// must be clustered on these keys.
+  /// @param errorMessage Error message to include in the exception when
+  /// duplicates are found.
+  PlanBuilder& streamingEnforceDistinct(
+      const std::vector<std::string>& distinctKeys,
+      std::string errorMessage);
 
   /// Stores the latest plan node ID into the specified variable. Useful for
   /// capturing IDs of the leaf plan nodes (table scans, exchanges, etc.) to use
