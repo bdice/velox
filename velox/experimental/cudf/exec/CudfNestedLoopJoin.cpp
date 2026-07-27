@@ -92,16 +92,15 @@ CudfNestedLoopJoinBridge::dataOrFuture(ContinueFuture* future) {
   return std::nullopt; // Probe will block on the future
 }
 
-void CudfNestedLoopJoinBridge::setBuildStream(
-    rmm::cuda_stream_view buildStream) {
+void CudfNestedLoopJoinBridge::setBuildReadyEvent(
+    std::shared_ptr<CudaEvent> buildReadyEvent) {
   std::lock_guard<std::mutex> l(mutex_);
-  buildStream_ = buildStream;
+  buildReadyEvent_ = std::move(buildReadyEvent);
 }
 
-std::optional<rmm::cuda_stream_view>
-CudfNestedLoopJoinBridge::getBuildStream() {
+std::shared_ptr<CudaEvent> CudfNestedLoopJoinBridge::getBuildReadyEvent() {
   std::lock_guard<std::mutex> l(mutex_);
-  return buildStream_;
+  return buildReadyEvent_;
 }
 
 // ============================================================================
@@ -197,14 +196,16 @@ void CudfNestedLoopJoinBuild::doNoMoreInput() {
       stream,
       get_output_mr());
 
+  auto buildReadyEvent = std::make_shared<CudaEvent>(cudaEventDisableTiming);
+  buildReadyEvent->recordFrom(stream);
+
   // Transfer build data to bridge - this will unblock probe operators.
-  // No stream sync is required: the probe side uses syncBuildStream() via a
-  // CUDA event to ensure the build table is ready before reading it.
+  // Probe streams wait on the build-ready event before reading the table.
   auto joinBridge = operatorCtx_->task()->getCustomJoinBridge(
       operatorCtx_->driverCtx()->splitGroupId, planNodeId());
   auto bridge = std::dynamic_pointer_cast<CudfNestedLoopJoinBridge>(joinBridge);
 
-  bridge->setBuildStream(stream); // Pass stream for CUDA synchronization
+  bridge->setBuildReadyEvent(std::move(buildReadyEvent));
   bridge->setData(
       std::make_optional(
           std::shared_ptr<cudf::table>(std::move(table)))); // Wake probes
@@ -466,7 +467,7 @@ exec::BlockingReason CudfNestedLoopJoinProbe::isBlocked(
     return exec::BlockingReason::kWaitForJoinBuild;
   }
 
-  buildStream_ = bridge->getBuildStream();
+  buildReadyEvent_ = bridge->getBuildReadyEvent();
 
   if (buildData_.value()->num_rows() == 0) {
     buildEmpty_ = true;
@@ -495,6 +496,7 @@ exec::BlockingReason CudfNestedLoopJoinProbe::isBlocked(
   // since the build table is fixed for the lifetime of this probe operator).
   if (hasFilter_ && !rightPrecomputeInstructions_.empty() && !buildEmpty_) {
     auto precomputeStream = cudfGlobalStreamPool().get_stream();
+    waitForBuildReady(precomputeStream);
     auto buildColumnViews = tableViewToColumnViews(buildData_.value()->view());
     buildPrecomputed_ = precomputeSubexpressions(
         buildColumnViews,
@@ -510,14 +512,9 @@ exec::BlockingReason CudfNestedLoopJoinProbe::isBlocked(
   return exec::BlockingReason::kNotBlocked;
 }
 
-void CudfNestedLoopJoinProbe::syncBuildStream(
-    rmm::cuda_stream_view probeStream) {
-  if (buildStream_.has_value()) {
-    if (!cudaEvent_) {
-      cudaEvent_ = std::make_unique<CudaEvent>();
-    }
-    cudaEvent_->recordFrom(buildStream_.value()).waitOn(probeStream);
-    buildStream_.reset();
+void CudfNestedLoopJoinProbe::waitForBuildReady(rmm::cuda_stream_view stream) {
+  if (buildReadyEvent_) {
+    buildReadyEvent_->waitOn(stream);
   }
 }
 
@@ -526,8 +523,6 @@ std::unique_ptr<cudf::table> CudfNestedLoopJoinProbe::joinWithBuildBatch(
     cudf::table_view buildView,
     rmm::cuda_stream_view stream) {
   VELOX_NVTX_FUNC_RANGE();
-
-  syncBuildStream(stream);
 
   auto numOutputColumns = outputType_->size();
 
@@ -760,10 +755,7 @@ RowVectorPtr CudfNestedLoopJoinProbe::emitBuildMismatchRows(
     return nullptr;
   }
 
-  // Empty probe input bypasses joinWithBuildBatch(), which normally orders the
-  // probe stream after asynchronous build-table allocation. Order this stream
-  // before gathering build data below.
-  syncBuildStream(stream);
+  waitForBuildReady(stream);
 
   auto& buildTable = buildData_.value();
   auto numOutputColumns = outputType_->size();
@@ -838,6 +830,7 @@ RowVectorPtr CudfNestedLoopJoinProbe::doGetOutput() {
   auto cudfInput = std::dynamic_pointer_cast<CudfVector>(input_);
   VELOX_CHECK_NOT_NULL(cudfInput);
   auto stream = cudfInput->stream();
+  waitForBuildReady(stream);
   lastProbeStream_ = stream;
 
   // LeftSemiProject: emit all probe rows with a boolean match column.

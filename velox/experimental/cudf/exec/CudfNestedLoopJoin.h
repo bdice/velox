@@ -55,13 +55,13 @@ class CudfNestedLoopJoinBridge : public exec::JoinBridge {
 
   std::optional<build_data_type> dataOrFuture(ContinueFuture* future);
 
-  void setBuildStream(rmm::cuda_stream_view buildStream);
+  void setBuildReadyEvent(std::shared_ptr<CudaEvent> buildReadyEvent);
 
-  std::optional<rmm::cuda_stream_view> getBuildStream();
+  std::shared_ptr<CudaEvent> getBuildReadyEvent();
 
  private:
   std::optional<build_data_type> data_;
-  std::optional<rmm::cuda_stream_view> buildStream_;
+  std::shared_ptr<CudaEvent> buildReadyEvent_;
 };
 
 /// Accumulates build-side input for nested loop join.
@@ -200,8 +200,8 @@ class CudfNestedLoopJoinProbe : public CudfOperatorBase {
   /// called by the last driver after merging flags from all peers.
   RowVectorPtr emitBuildMismatchRows(rmm::cuda_stream_view stream);
 
-  /// Ensures build-stream data is visible on the given probe stream.
-  void syncBuildStream(rmm::cuda_stream_view probeStream);
+  /// Ensures build data is visible on the given stream.
+  void waitForBuildReady(rmm::cuda_stream_view stream);
 
   bool isLeftOrFullJoin() const {
     return joinType_ == core::JoinType::kLeft ||
@@ -275,9 +275,8 @@ class CudfNestedLoopJoinProbe : public CudfOperatorBase {
   // noMoreInput() to ensure GPU-side ordering before flag merge.
   std::optional<rmm::cuda_stream_view> lastProbeStream_;
 
-  // CUDA stream synchronization for build data visibility.
-  std::optional<rmm::cuda_stream_view> buildStream_;
-  std::unique_ptr<CudaEvent> cudaEvent_;
+  // CUDA event for build data visibility.
+  std::shared_ptr<CudaEvent> buildReadyEvent_;
 };
 
 /// Creates CUDF nested loop join operators and bridges.
