@@ -759,6 +759,12 @@ RowVectorPtr CudfNestedLoopJoinProbe::emitBuildMismatchRows(
     finished_ = true;
     return nullptr;
   }
+
+  // Empty probe input bypasses joinWithBuildBatch(), which normally orders the
+  // probe stream after asynchronous build-table allocation. Order this stream
+  // before gathering build data below.
+  syncBuildStream(stream);
+
   auto& buildTable = buildData_.value();
   auto numOutputColumns = outputType_->size();
 
