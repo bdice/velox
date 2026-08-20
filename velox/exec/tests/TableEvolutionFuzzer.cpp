@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <filesystem>
 
+#include <folly/executors/CPUThreadPoolExecutor.h>
 #include <re2/re2.h>
 
 DEFINE_bool(
@@ -153,6 +154,10 @@ constexpr int kProbeRows = 64;
 // Number of distinct query shapes run against each written set of files. The
 // (now expensive) write happens once per run(); this many shapes amortize it.
 constexpr int kQueryShapesPerFile = 20;
+
+// A bucketed write can keep up to 256 file writers open. Limit concurrent
+// write tasks so the fuzzer stays below the common 1,024 file-descriptor limit.
+constexpr size_t kMaxConcurrentWriteTasks = 2;
 
 VectorFuzzer::Options makeVectorFuzzerOptions() {
   VectorFuzzer::Options options;
@@ -943,8 +948,9 @@ void TableEvolutionFuzzer::run() {
       globalMapColumnKeys,
       globallyConsistentColumnIndexVector);
 
-  auto executor = folly::getGlobalCPUExecutor();
-  auto writeResults = runTaskCursors(writeTasks, *executor);
+  folly::CPUThreadPoolExecutor writeExecutor(
+      std::min(writeTasks.size(), kMaxConcurrentWriteTasks));
+  auto writeResults = runTaskCursors(writeTasks, writeExecutor);
 
   // Merge the final setup's batches into one vector, once, just before the
   // query-shape loop that uses it to generate subfield filters over every row.
