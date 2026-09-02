@@ -228,6 +228,36 @@ TEST_F(DecoderUtilTest, processFixedWithRun) {
   }
 }
 
+TEST_F(DecoderUtilTest, processFixedWidthRunUsesPortableIndexLaneCount) {
+  constexpr int32_t kSize = xsimd::batch<int16_t>::size;
+  raw_vector<int16_t> data(kSize);
+  raw_vector<int32_t> rows(kSize);
+  raw_vector<int32_t> scatter(kSize);
+  raw_vector<int32_t> hits(kSize);
+  for (int32_t i = 0; i < kSize; ++i) {
+    data[i] = i + 1;
+    rows[i] = i;
+    scatter[i] = 100 + i;
+  }
+
+  auto filter = std::make_unique<common::BigintRange>(0, 1000, false);
+  NoHook noHook;
+  int32_t numValues = 0;
+  processFixedWidthRun<int16_t, false, true, false>(
+      rows,
+      0,
+      kSize,
+      scatter.data(),
+      data.data(),
+      hits.data(),
+      numValues,
+      *filter,
+      noHook);
+
+  EXPECT_EQ(numValues, kSize);
+  EXPECT_THAT(hits, ElementsAreArray(scatter));
+}
+
 TEST_F(DecoderUtilTest, fixedWidthScanMemcpyFastPath) {
   constexpr int kSize = 10;
   int32_t rows[kSize];

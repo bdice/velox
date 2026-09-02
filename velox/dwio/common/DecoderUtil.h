@@ -201,9 +201,9 @@ auto bitMaskIndices(uint8_t bits, const A& arch = {}) {
 // returns the row numbers corresponding to the elements in
 // 'values'. These are not necessarily contiguous since values from
 // non-contiguous rows may have been gathered for a single call to
-// this. loadIndices is called with an argument of 0 to geth the 8
-// first row numbers and if values has 16 elements, an argument of 1
-// gets the next 8 row numbers.
+// this. loadIndices is called with an argument of 0 to get the first
+// xsimd::batch<int32_t>::size row numbers. If 'values' has more elements,
+// an argument of 1 gets the next batch of row numbers.
 template <
     typename T,
     bool filterOnly,
@@ -228,7 +228,7 @@ inline void processFixedFilter(
   } else if (word == simd::allSetBitMask<T>()) {
     loadIndices(0).store_unaligned(filterHits + numValues);
     if (is16 && width > kIndexLaneCount) {
-      // If 16 values in 'values', copy the next 8x 32 bit indices.
+      // Copy the next batch of 32-bit indices.
       loadIndices(1).store_unaligned(filterHits + numValues + kIndexLaneCount);
     }
     if (!filterOnly) {
@@ -287,6 +287,7 @@ void fixedWidthScan(
     const TFilter& filter,
     THook& hook) {
   constexpr int32_t kWidth = xsimd::batch<T>::size;
+  constexpr int32_t kIndexLaneCount = xsimd::batch<int32_t>::size;
   constexpr bool is16 = sizeof(T) == 2;
   constexpr int32_t kStep = is16 ? 16 : 8;
   constexpr bool hasFilter =
@@ -369,7 +370,7 @@ void fixedWidthScan(
                       [&](int32_t offset) {
                         return simd::loadGatherIndices<T>(
                             (scatter ? scatterRows : rows) + rowIndex +
-                            8 * offset);
+                            kIndexLaneCount * offset);
                       },
                       rawValues,
                       filterHits,
@@ -420,7 +421,7 @@ void fixedWidthScan(
                         if (offset) {
                           return simd::loadGatherIndices<T>(
                               (scatter ? scatterRows : rows) + rowIndex +
-                              8 * offset);
+                              kIndexLaneCount * offset);
                         }
                         return scatter
                             ? simd::loadGatherIndices<T>(scatterRows + rowIndex)
@@ -476,7 +477,7 @@ void fixedWidthScan(
                       [&](int32_t offset) {
                         return simd::loadGatherIndices<T>(
                             (scatter ? scatterRows : rows) + rowIndex +
-                            8 * offset);
+                            kIndexLaneCount * offset);
                       },
                       rawValues,
                       filterHits,
@@ -603,6 +604,7 @@ void processFixedWidthRun(
     const TFilter& filter,
     THook& hook) {
   constexpr int32_t kWidth = xsimd::batch<T>::size;
+  constexpr int32_t kIndexLaneCount = xsimd::batch<int32_t>::size;
   constexpr bool hasFilter =
       !std::is_same_v<TFilter, velox::common::AlwaysTrue>;
   constexpr bool hasHook = !std::is_same_v<THook, NoHook>;
@@ -632,7 +634,7 @@ void processFixedWidthRun(
         [&](int32_t offset) {
           return simd::loadGatherIndices<T>(
               (scatter ? scatterRows : rows.data()) + rowIndex + row +
-              offset * 8);
+              offset * kIndexLaneCount);
         },
         values,
         filterHits,
@@ -648,7 +650,7 @@ void processFixedWidthRun(
         [&](int32_t offset) {
           return simd::loadGatherIndices<T>(
               (scatter ? scatterRows : rows.data()) + row + rowIndex +
-              offset * 8);
+              offset * kIndexLaneCount);
         },
         values,
         filterHits,
