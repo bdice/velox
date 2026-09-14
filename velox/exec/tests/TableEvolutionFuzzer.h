@@ -63,6 +63,10 @@ class TableEvolutionFuzzer {
         std::unordered_map<std::string, std::string>,
         std::unordered_map<std::string, std::string>>(FuzzerGenerator&)>
         extraReadSessionProperties;
+
+    /// Probability that each fuzzed element is NULL. Default 0 (no nulls).
+    /// Set to e.g. 0.1 for format-specific fuzzers that need null coverage.
+    double nullRatio = 0;
   };
 
   /// Per-batch raw-byte target and clamp bounds for adaptive batch sizing. A
@@ -169,9 +173,13 @@ class TableEvolutionFuzzer {
 
   std::string makeNewName();
 
-  TypePtr makeNewType(int maxDepth);
+  /// When 'allowTimestamp' is false, TIMESTAMP is left out of the generated
+  /// type, at any nesting depth. Used for bucket columns; see
+  /// makeInitialSchema().
+  TypePtr makeNewType(int maxDepth, bool allowTimestamp = true);
 
   RowTypePtr makeInitialSchema(
+      const std::vector<column_index_t>& bucketColumnIndices = {},
       const std::vector<std::string>& additionalColumnNames = {},
       const std::vector<TypePtr>& additionalColumnTypes = {});
 
