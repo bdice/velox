@@ -113,7 +113,7 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/ccache
       VELOX_DEPENDENCY_SOURCE: SYSTEM
       cudf_SOURCE: BUNDLED
-      CUDA_VERSION: '12.9'
+      CUDA_VERSION: '13.4'
       faiss_SOURCE: BUNDLED
       USE_CLANG: "${{ inputs.use-clang && 'true' || 'false' }}"
       # Empty when full mode (or when the plan emitted no targets);
@@ -178,7 +178,7 @@ jobs:
         id: build
         env:
           MAKEFLAGS: NUM_THREADS=32 MAX_HIGH_MEM_JOBS=12 MAX_LINK_JOBS=12
-          CUDA_ARCHITECTURES: 70
+          CUDA_ARCHITECTURES: 75
           CUDA_COMPILER: /usr/local/cuda-${CUDA_VERSION}/bin/nvcc
           # Set compiler to GCC 14
           CUDA_FLAGS: -ccbin /opt/rh/gcc-toolset-14/root/usr/bin
@@ -459,7 +459,7 @@ jobs:
           persist-credentials: false
       - name: Install Packages
         run: |
-          sudo apt-get update && sudo apt-get install -y cmake patchelf cuda-toolkit-12-9
+          sudo apt-get update && sudo apt-get install -y cmake patchelf cuda-toolkit-13-4
           export INSTALL_PREFIX=/usr/local SUDO=sudo
           source ${GITHUB_WORKSPACE}/scripts/setup-common.sh
           install_silo linux
