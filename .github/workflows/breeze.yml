@@ -127,7 +127,7 @@ jobs:
     if: ${{ github.repository == 'facebookincubator/velox' }}
     name: Ubuntu GPU debug
     env:
-      CUDA_VERSION: '12.9'
+      CUDA_VERSION: '13.4'
     defaults:
       run:
         shell: bash
