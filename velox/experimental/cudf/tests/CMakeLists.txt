@@ -33,7 +33,7 @@ set(CUDF_TESTS_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 #     [TIMEOUT <seconds>]
 #   )
 #
-# gtest and gtest_main are always appended to LIBS.
+# gtest, gtest_main, and gmock are always appended to LIBS.
 # Default timeout: 300 seconds
 function(velox_add_cudf_test)
   set(options "")
@@ -49,7 +49,7 @@ function(velox_add_cudf_test)
   set_target_properties(${ARG_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CUDF_TESTS_OUTPUT_DIR})
   add_test(NAME ${ARG_NAME} COMMAND ${ARG_NAME} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   set_tests_properties(${ARG_NAME} PROPERTIES LABELS cuda_driver TIMEOUT ${ARG_TIMEOUT})
-  target_link_libraries(${ARG_NAME} ${ARG_LIBS} gtest gtest_main)
+  target_link_libraries(${ARG_NAME} ${ARG_LIBS} gtest gtest_main gmock)
 endfunction()
 
 if(VELOX_ENABLE_ABFS)
