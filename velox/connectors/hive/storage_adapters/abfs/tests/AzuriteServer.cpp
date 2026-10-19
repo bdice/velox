@@ -79,7 +79,7 @@ void AzuriteServer::start() {
     VELOX_FAIL("Failed to launch Azurite server: {}", e.what());
   }
   const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(15);
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
   while (std::chrono::steady_clock::now() < deadline) {
     if (!serverProcess_->running()) {
       VELOX_FAIL(
