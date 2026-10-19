@@ -36,7 +36,8 @@ bool isPortReady(int64_t port) {
   address.sin_port = htons(static_cast<uint16_t>(port));
   address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   const bool ready =
-      ::connect(socketFd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) ==
+      ::connect(
+          socketFd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) ==
       0;
   ::close(socketFd);
   return ready;
@@ -74,24 +75,23 @@ void AzuriteServer::start() {
   try {
     serverProcess_ = std::make_unique<boost::process::child>(
         env_, exePath_, commandOptions_);
-    const auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(15);
-    while (std::chrono::steady_clock::now() < deadline) {
-      if (!serverProcess_->running()) {
-        VELOX_FAIL(
-            "AzuriteServer process exited, code: {}",
-            serverProcess_->exit_code());
-      }
-      if (isPortReady(port_)) {
-        return;
-      }
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-    VELOX_FAIL(
-        "Timed out waiting for AzuriteServer to listen on port {}", port_);
   } catch (const std::exception& e) {
     VELOX_FAIL("Failed to launch Azurite server: {}", e.what());
   }
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(15);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (!serverProcess_->running()) {
+      VELOX_FAIL(
+          "AzuriteServer process exited, code: {}",
+          serverProcess_->exit_code());
+    }
+    if (isPortReady(port_)) {
+      return;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+  VELOX_FAIL("Timed out waiting for AzuriteServer to listen on port {}", port_);
 }
 
 void AzuriteServer::stop() {
