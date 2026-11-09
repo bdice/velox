@@ -3130,6 +3130,9 @@ TEST_P(MultiFragmentTest, compression) {
     }
     ASSERT_EQ(data->size() * kNumRepeats, consumerStats.outputRows);
 
+    // PartitionedOutput publishes compression statistics in close(). The
+    // consumer can finish before the producer has closed its operators.
+    ASSERT_TRUE(waitForTaskCompletion(producerTask.get(), 3'000'000));
     auto producerTaskStats = exec::toPlanStats(producerTask->taskStats());
     const auto& producerStats = producerTaskStats.at("1");
     {
