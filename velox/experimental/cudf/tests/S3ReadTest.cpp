@@ -245,7 +245,9 @@ TEST_F(S3ReadTest, s3ReadTest) {
 TEST_F(S3ReadTest, missingFileWithSizeIsIgnored) {
   using facebook::velox::connector::hive::HiveConfig;
   using facebook::velox::cudf_velox::connector::hive::CudfHiveConfig;
-  siloServer_->addBucket(kBucketName);
+  // Complete an S3 operation before testing missing-object responses. Creating
+  // the bucket directory alone does not wait for Silo to initialize.
+  uploadIntParquet();
   auto missingSplit = [&]() {
     facebook::velox::connector::hive::HiveConnectorSplitBuilder builder(
         filesystems::s3URI(kBucketName, "missing.parquet"));
