@@ -250,6 +250,8 @@ TEST_F(PrintPlanWithStatsTest, innerJoinWithTableScan) {
        {"          processedSplits[ ]+sum: 20, count: 1, min: 20, max: 20, avg: 20"},
        {"          processedStrides[ ]+sum: 20, count: 1, min: 20, max: 20, avg: 20"},
        {"          processedUnits      [ ]* sum: .+, count: .+, min: .+, max: .+"},
+       {"          queuedWallNanos\\s+sum: .+, count: .+, min: .+, max: .+",
+        true},
        {"          ramReadBytes        [ ]* sum: .+, count: .+, min: .+, max: .+",
         true},
        {"          readyPreloadedSplits[ ]+sum: .+, count: .+, min: .+, max: .+",
