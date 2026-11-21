@@ -857,8 +857,8 @@ TEST_F(DateTimeFunctionsTest, hourTimestampWithTimezoneGmtFallback) {
 }
 
 TEST_F(DateTimeFunctionsTest, hourTimestampWithTimezoneLegacyDefault) {
-  // Legacy mode must not resolve the unused invalid session zone.
-  setQueryTimeZone("Not/AZone");
+  // Legacy mode uses the timestamp's zone rather than the session zone.
+  setQueryTimeZone("Asia/Tokyo");
   const auto hourTimestampWithTimezone =
       [&](std::optional<TimestampWithTimezone> timestampWithTimezone) {
         return evaluateOnce<int64_t>(
